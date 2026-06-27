@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import usePageTitle from "../hooks/usePageTitle.js";
 import { useToast } from "../context/ToastContext.jsx";
 import api from "../api/axios.js";
@@ -185,11 +185,20 @@ function AssessmentPreview({ assessment, savedId, saveStatus, candidates, loadin
             <span className="ai-preview-tag">📝 {assessment.problems?.length || 0} problems</span>
           </div>
         </div>
-        {savedId && (
-          <button className="btn btn-outline" onClick={onOpenBuilder} style={{ fontSize: 13, padding: "9px 18px" }}>
-            ✏️ Open in Builder
+        {savedId && saveStatus !== "saving" && (
+        <div className="ai-goto-builder">
+          <div className="ai-goto-left">
+            <span className="ai-goto-check">✓</span>
+            <div>
+              <div className="ai-goto-title">Assessment saved & ready</div>
+              <div className="ai-goto-sub">Review the problems on the right, then open the builder to finalise or send.</div>
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={onOpenBuilder}>
+            Open in Builder →
           </button>
-        )}
+        </div>
+      )}
       </div>
 
       {assessment.description && <p className="ai-preview-desc">{assessment.description}</p>}
@@ -259,18 +268,20 @@ function AssessmentPreview({ assessment, savedId, saveStatus, candidates, loadin
 export default function AssessmentAIChat() {
   usePageTitle("AI Assessment Builder");
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [messages, setMessages]           = useState([STARTER_MSG]);
   const [input, setInput]                 = useState("");
   const [loading, setLoading]             = useState(false);
   const [assessment, setAssessment]       = useState(null);
-  const [savedId, setSavedId]             = useState(null);   // DB id once saved
-  const [saveStatus, setSaveStatus]       = useState("idle"); // idle|saving|saved|updated|error
+  const [savedId, setSavedId]             = useState(null);
+  const [saveStatus, setSaveStatus]       = useState("idle");
   const [candidates, setCandidates]       = useState([]);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
 
-  const bottomRef = useRef(null);
-  const inputRef  = useRef(null);
+  const bottomRef  = useRef(null);
+  const inputRef   = useRef(null);
+  const savedIdRef = useRef(null); // always-current ref to avoid stale closure
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -286,7 +297,8 @@ export default function AssessmentAIChat() {
       .finally(() => setLoadingCandidates(false));
   }, []);
 
-  // AUTO-SAVE: whenever `assessment` changes, create or update in DB
+  // AUTO-SAVE: whenever `assessment` changes, create or update in DB.
+  // Uses savedIdRef (not savedId state) to avoid stale closure bugs.
   useEffect(() => {
     if (!assessment) return;
 
@@ -300,17 +312,21 @@ export default function AssessmentAIChat() {
     };
 
     setSaveStatus("saving");
+    const isNew = !savedIdRef.current;
 
-    const doSave = savedId
-      ? api.put(`/assessments/${savedId}`, payload)
-      : api.post("/assessments", payload);
+    const doSave = isNew
+      ? api.post("/assessments", payload)
+      : api.put(`/assessments/${savedIdRef.current}`, payload);
 
     doSave
       .then(res => {
         const id = res.data.assessment._id;
+        savedIdRef.current = id;
         setSavedId(id);
-        setSaveStatus(savedId ? "updated" : "saved");
-        if (!savedId) showToast("✅ Assessment auto-saved!", "success");
+        setSaveStatus(isNew ? "saved" : "updated");
+        if (isNew) {
+          showToast("✅ Assessment auto-saved! Review it, then open the builder.", "success");
+        }
       })
       .catch(() => {
         setSaveStatus("error");
@@ -361,12 +377,13 @@ export default function AssessmentAIChat() {
     setMessages([STARTER_MSG]);
     setAssessment(null);
     setSavedId(null);
+    savedIdRef.current = null;  // clear ref too
     setSaveStatus("idle");
     setInput("");
   };
 
   const handleOpenBuilder = () => {
-    if (savedId) window.open(`/dashboard/assessments/${savedId}`, "_blank");
+    if (savedId) navigate(`/dashboard/assessments/${savedId}`);
   };
 
   return (

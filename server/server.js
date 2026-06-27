@@ -22,16 +22,34 @@ connectDB();
 
 const app = express();
 
-// Security headers
-app.use(helmet());
+// Security headers — relax crossOriginResourcePolicy for API use
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+
+// Allowed origins: localhost dev + any deployed client URL from env
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:4173",
+  process.env.CLIENT_URL,           // e.g. https://hirecode-mern.vercel.app
+  process.env.CLIENT_URL_PREVIEW,   // optional: Vercel preview URLs
+].filter(Boolean);
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      // Allow requests with no origin (Postman, curl, mobile apps)
+      if (!origin) return callback(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      // Allow any *.vercel.app subdomain (preview deployments)
+      if (/\.vercel\.app$/.test(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
     credentials: true,
   })
 );
 app.use(express.json({ limit: "200kb" }));
+
 
 // Serve uploaded files (resumes etc.)
 const __filename = fileURLToPath(import.meta.url);
